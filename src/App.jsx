@@ -1,10 +1,10 @@
-import { useEFfect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useImmerReducer } from 'use-immer'
 
 function onlyUniqueBreeds(pics) {
   const uniqueBreeds = []
   const uniquePics = pics.filter((pic) => {
-    const breed = pic.split('/'[4])
+    const breed = pic.split('/')[4]
     if (!uniqueBreeds.includes(breed) && !pic.includes(' ')) {
       uniqueBreeds.push(breed)
       return true
@@ -14,10 +14,23 @@ function onlyUniqueBreeds(pics) {
 }
 
 function ourReducer(draft, action) {
+  if (draft.points > draft.highScore) draft.highScore = draft.points
+
   switch (action.type) {
+    case 'receiveHighScore':
+      draft.highScore = action.value
+      if (!action.value) draft.highScore = 0
+      return
+    case 'decreaseTime':
+      if (draft.timeRemaining <= 0) {
+        draft.playing = false
+      } else {
+        draft.timeRemaining--
+      }
+      return
     case 'guessAttempt':
       if (!draft.playing) return
-      if (action.value == draft.currentQuestion.answer) {
+      if (action.value === draft.currentQuestion.answer) {
         draft.points++
         draft.currentQuestion = generateQuestion()
       } else {
@@ -27,9 +40,6 @@ function ourReducer(draft, action) {
         }
       }
       return
-    case 'addToCollection':
-      draft.bigCollection = draft.bigCollection.concat(action.value)
-      return
     case 'startPlaying':
       draft.timeRemaining = 30
       draft.points = 0
@@ -37,12 +47,16 @@ function ourReducer(draft, action) {
       draft.playing = true
       draft.currentQuestion = generateQuestion()
       return
+    case 'addToCollection':
+      draft.bigCollection = draft.bigCollection.concat(action.value)
+      return
   }
 
   function generateQuestion() {
     if (draft.bigCollection.length <= 12) {
       draft.fetchCount++
     }
+
     if (draft.currentQuestion) {
       draft.bigCollection = draft.bigCollection.slice(
         4,
@@ -53,7 +67,7 @@ function ourReducer(draft, action) {
     const tempRandom = Math.floor(Math.random() * 4)
     const justFour = draft.bigCollection.slice(0, 4)
     return {
-      breed: justFour[tempRandom].split('/'[4]),
+      breed: justFour[tempRandom].split('/')[4],
       photos: justFour,
       answer: tempRandom,
     }
@@ -87,7 +101,57 @@ function HeartIcon(props) {
 }
 
 function App() {
+  const timer = useRef(null)
   const [state, dispatch] = useImmerReducer(ourReducer, initialState)
+
+  useEffect(() => {
+    if (state.playing) {
+      console.log('interval created')
+      timer.current = setInterval(() => {
+        dispatch({ type: 'decreaseTime' })
+      }, 1000)
+
+      return () => {
+        console.log('interval cleared')
+        clearInterval(timer.current)
+      }
+    }
+  }, [state.playing])
+
+  useEffect(() => {
+    if (state.highScore > 0) {
+      localStorage.setItem('highscore', state.highScore)
+    }
+  }, [state.highScore])
+
+  useEffect(() => {
+    dispatch({
+      type: 'receiveHighScore',
+      value: localStorage.getItem('highscore'),
+    })
+  }, [])
+
+  useEffect(() => {
+    if (state.bigCollection.length) {
+      state.bigCollection.slice(0, 8).forEach((pic) => {
+        new Image().scr = pic
+      })
+    }
+  }, [state.bigCollection])
+
+  useEffect(() => {
+    if (state.playing) {
+      console.log('Interval created.')
+      timer.current = setInterval(() => {
+        dispatch({ type: 'decreaseTime' })
+      }, 1000)
+
+      return () => {
+        console.log('interval cleared from cleanup')
+        clearInterval(timer.current)
+      }
+    }
+  }, [state.playing])
 
   useEffect(() => {
     const reqController = new AbortController()
@@ -101,8 +165,8 @@ function App() {
         const pics = await picsPromise.json()
         const uniquePics = onlyUniqueBreeds(pics.message)
         dispatch({ type: 'addToCollection', value: uniquePics })
-      } catch (error) {
-        console.log('Request cancelled')
+      } catch {
+        console.log('Our request was cancelled.')
       }
     }
     go()
@@ -145,7 +209,6 @@ function App() {
                 <HeartIcon key={index} className='inline text-pink-600 mx-1' />
               )
             })}
-
             {[...Array(state.strikes)].map((item, index) => {
               return (
                 <HeartIcon key={index} className='inline text-pink-100 mx-1' />
@@ -163,7 +226,7 @@ function App() {
                     dispatch({ type: 'guessAttempt', value: index })
                   }
                   key={index}
-                  className='rounded-lg h-40 lg:h-80 big-cover bg-center'
+                  className='rounded-lg h-40 lg:h-80 bg-cover bg-center'
                   style={{ backgroundImage: `url(${photo})` }}
                 ></div>
               )
@@ -171,16 +234,61 @@ function App() {
           </div>
         </>
       )}
-
       {state.playing == false &&
         Boolean(state.bigCollection.length) &&
         !state.currentQuestion && (
           <p className='text-center fixed top-0 bottom-0 left-0 right-0 flex justify-center items-center'>
             <button
               onClick={() => dispatch({ type: 'startPlaying' })}
-              className='text-white bg-gradient-to-b from-indigo-500 to-indigo-600 px-4 py-3 rounded text-2xl bold'
-            ></button>
+              className='text-white bg-gradient-to-b from-indigo-500 to-indigo-600 px-4 py-3 rounded text-2xl font-bold'
+            >
+              Play
+            </button>
           </p>
+        )}
+
+      {(state.timeRemaining <= 0 || state.strikes >= 3) &&
+        state.currentQuestion && (
+          <div className='fixed top-0 left-0 bottom-0 right-0 bg-black/90 text-white flex justify-center items-center text-center'>
+            <div>
+              {state.timeRemaining <= 0 && (
+                <p className='text-6xl mb-4 font-bold'>Time's Up!</p>
+              )}
+              {state.strikes >= 3 && (
+                <p className='text-6xl mb-4 font-bold'>
+                  3 Strikes; You're Out!
+                </p>
+              )}
+
+              <p>
+                Your score:{' '}
+                <span className='text-amber-400'>
+                  <svg
+                    xmlns='http://www.w3.org/2000/svg'
+                    width='24'
+                    height='24'
+                    fill='currentColor'
+                    className='inline-block relative bottom-1 mx-1'
+                    viewBox='0 0 16 16'
+                  >
+                    <path d='M3.612 15.443c-.386.198-.824-.149-.746-.592l.83-4.73L.173 6.765c-.329-.314-.158-.888.283-.95l4.898-.696L7.538.792c.197-.39.73-.39.927 0l2.184 4.327 4.898.696c.441.062.612.636.282.95l-3.522 3.356.83 4.73c.078.443-.36.79-.746.592L8 13.187l-4.389 2.256z' />
+                  </svg>
+                  {state.points}
+                </span>
+              </p>
+
+              <p className='mb-5'>
+                Your all-time high score: {state.highScore}
+              </p>
+
+              <button
+                onClick={() => dispatch({ type: 'startPlaying' })}
+                className='text-white bg-gradient-to-b from-indigo-500 to-indigo-600 px-4 py-3 rounded text-lg font-bold'
+              >
+                Play again
+              </button>
+            </div>
+          </div>
         )}
     </div>
   )
